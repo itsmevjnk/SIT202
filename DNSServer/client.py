@@ -18,10 +18,20 @@ class Record:
         self.ttl = ttl # the record's TTL (< 0 means no expiry)
         self.queriedAt: float = time() # timestamp of when this record was queried from the upstream DNS server
     
+    # get string representation of the record (for debugging, mostly)
+    def __repr__(self) -> str:
+        return f'{self.recordType} {self.name}: {self.value}'
+
     # get the expiry timestamp of this record
-    def getExpiry(self) -> float:
+    @property
+    def expiry(self) -> float:
         if self.ttl < 0: return float('inf') # no expiry
         else: return self.queriedAt + self.ttl
+    
+    # whether the record has expired
+    @property
+    def expired(self) -> bool:
+        return self.expiry < time()
 
     # convert from record name to raw name data
     @staticmethod
@@ -99,12 +109,14 @@ class Record:
         result.extend(self.classField)
         result.extend(self.ttlField)
 
-        if self.recordType == 'A': # IP address - convert from string notation to raw data
+        if self.recordType == 'A': # IPv4 address - convert from string notation to raw data
             data = bytearray([int(x) for x in self.value.split('.')])
+        elif self.recordType == 'AAAA': # IPv6 address
+            data = bytearray.fromhex(self.value.replace(':', '')) # remove all separators, then convert to hex bytearray
         elif self.recordType == 'CNAME' or self.recordType == 'NS': # TODO: add any other record type that returns label
             data = Record.convertRecordName(self.value)
         else:
-            data = self.value.encode()
+            data = self.value.encode('ascii')
         result.extend(pack('!H', len(data))) # RDLENGTH
         result.extend(data) # RDATA
 
@@ -168,10 +180,12 @@ class Record:
         rdStart = nameLength + 10
         if recordType == 'A': # A record
             value = '.'.join([str(x) for x in unpack('BBBB', answer[rdStart:rdStart+4])]) # IP address to string
+        elif recordType == 'AAAA': # AAAA record (IPv6) - got no use for us
+            value = ':'.join([f'{x:04x}' for x in unpack('!HHHHHHHH', answer[rdStart:rdStart+16])]) # IPv6 address to string
         elif recordType == 'CNAME' or recordType == 'NS':
             _, value = Record.nameFromRR(answer[rdStart:rdStart+rdLength], msg) # decode CNAME/NS to string
         else:
-            value = answer[rdStart:rdStart+rdLength].decode()
+            value = answer[rdStart:rdStart+rdLength].decode('ascii')
 
         return (rdStart + rdLength, Record(recordType, name, value, ttl))       
 
@@ -231,6 +245,11 @@ class DNSMessage:
         self.authority = authority
         self.additional = additional
     
+    # check if there's an error (that is not NXDOMAIN)
+    @property
+    def error(self) -> bool:
+        return not (self.respCode == 'NOERROR' or self.respCode == 'NXDOMAIN')
+
     # decode questions field
     @staticmethod
     def decodeQuestions(questions: bytes, numQuestions: int) -> tuple[int, list[Record]]: # returns number of bytes read and the record list
