@@ -2,10 +2,12 @@ from socket import *
 from struct import pack, unpack
 from time import time
 from random import randint
+from os import getenv
 
 from typing_extensions import Self
 
 BUFFER_SIZE = 2048 # buffer size for receiving UDP datagrams
+DNS_PORT = int(getenv('PORT', '53')) # DNS port number - use PORT=10053 python3 client.py to connect to our server
 
 # DNS record class
 class Record:
@@ -325,7 +327,7 @@ def main():
 
     with socket(AF_INET, SOCK_DGRAM) as client:
         while True:
-            print(f'\nUsing DNS server on {serverAddress}')
+            print(f'\nUsing DNS server on {serverAddress} (port {DNS_PORT})')
 
             # prompt for hostname
             hostname = input('Please enter the hostname to query: ')
@@ -345,7 +347,7 @@ def main():
             if choice == 'n': recurse = False # recursive by default
 
             print('Sending DNS query.')
-            client.sendto(DNSMessage(recurseDesired=recurse, questions=[Record(recordType, hostname)]).payload, (serverAddress, 53)) # create DNS message, encode it, then send it to serverAddress on port 53 (DNS)
+            client.sendto(DNSMessage(recurseDesired=recurse, questions=[Record(recordType, hostname)]).payload, (serverAddress, DNS_PORT)) # create DNS message, encode it, then send it to serverAddress on port 53 (DNS)
 
             print('Receiving DNS response.')
             rawResponse, _ = client.recvfrom(BUFFER_SIZE)
