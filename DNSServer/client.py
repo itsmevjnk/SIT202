@@ -122,7 +122,7 @@ class Record:
                     index += 1
                     break
 
-                offset = unpack('!H', rr[index:index+2]) & ~0xC0 # get message offset, from which we extract the name
+                offset = unpack('!H', rr[index:index+2])[0] & ~0xC000 # get message offset, from which we extract the name
                 _, decompressedName = Record.nameFromRR(msg[offset:], msg)
                 name += decompressedName + '.'
                 index += 1
@@ -165,9 +165,9 @@ class Record:
         rdLength = unpack('!H', answer[nameLength+8:nameLength+10])[0]
         rdStart = nameLength + 10
         if recordType == 'A': # A record
-            value = '.'.join([str(unpack('B', answer[rdStart+i:rdStart+i+1])) for i in range(4)]) # IP address to string
+            value = '.'.join([str(x) for x in unpack('BBBB', answer[rdStart:rdStart+4])]) # IP address to string
         elif recordType == 'CNAME' or recordType == 'NS':
-            value = Record.nameFromRR(answer[rdStart:rdStart+rdLength], msg) # decode CNAME/NS to string
+            _, value = Record.nameFromRR(answer[rdStart:rdStart+rdLength], msg) # decode CNAME/NS to string
         else:
             value = answer[rdStart:rdStart+rdLength].decode()
 
@@ -312,6 +312,13 @@ class DNSMessage:
 
         return result
 
+def printRecords(records: list[Record], printValue: bool = True):
+    for record in records:
+        print(f' - {record.name}, type {record.recordType}', end='')
+        if printValue:
+            print(f': {record.value} (TTL={record.ttl if record.ttl >= 0 else "infinity"})')
+        else: print() # new line
+
 def main():
     # prompt for DNS server address
     serverAddress = input('Please enter the DNS server address: ')
@@ -341,8 +348,13 @@ def main():
             client.sendto(DNSMessage(recurseDesired=recurse, questions=[Record(recordType, hostname)]).payload, (serverAddress, 53)) # create DNS message, encode it, then send it to serverAddress on port 53 (DNS)
 
             print('Receiving DNS response.')
-            rawResponse = client.recvfrom(BUFFER_SIZE)
-            print(rawResponse)
+            rawResponse, _ = client.recvfrom(BUFFER_SIZE)
+            responseMsg: DNSMessage = DNSMessage.fromMessage(rawResponse) # decode DNS message from server
+            print(f'DNS response: {responseMsg.respCode}, ID {responseMsg.id}, recursion available: {responseMsg.recurseAvailable}')
+            print(f'Non-authoritative answers: {len(responseMsg.answers)}'); printRecords(responseMsg.answers)
+            print(f'Authoritative answers: {len(responseMsg.authority)}'); printRecords(responseMsg.authority)
+            print(f'Additional answers: {len(responseMsg.additional)}'); printRecords(responseMsg.additional)
+            
 
             # ask if the user wants to exit
             choice = input(f'Do you want to continue with another DNS query? (Y/n) ').lower()
